@@ -1,0 +1,24 @@
+# A persistent disk requires a paid Render service. Review cost before creating.
+services:
+  - type: web
+    name: eco-mart-pos
+    runtime: python
+    plan: starter
+    region: frankfurt
+    numInstances: 1
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --config gunicorn.conf.py wsgi:application
+    healthCheckPath: /api/health
+    disk:
+      name: eco-mart-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.14
+      - key: POS_DB
+        value: /var/data/pos.sqlite3
+      - key: POS_PUBLIC
+        value: "1"
+      - key: POS_SETUP_TOKEN
+        generateValue: true
