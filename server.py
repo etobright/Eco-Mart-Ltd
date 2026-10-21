@@ -2,6 +2,8 @@
 import os, json, sqlite3, secrets, hashlib, hmac, time, io
 from threading import Lock
 from http.cookies import SimpleCookie
+from urllib.parse import parse_qs, urlsplit
+from labels import label_pdf
 from pathlib import Path
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -82,6 +84,19 @@ class Handler(SimpleHTTPRequestHandler):
             if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,authenticated=self.authenticated()))
             if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
             if path=='/api/state': return self.send_json(dict(settings=settings(c), products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,p.name FROM movements m JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
+            if path=='/api/labels/pdf':
+                try:
+                    query=parse_qs(urlsplit(self.path).query)
+                    pid=integer(query.get('id',[''])[0],1)
+                    count=integer(query.get('count',['1'])[0],1,200)
+                    product=c.execute('SELECT * FROM products WHERE id=? AND active=1',(pid,)).fetchone()
+                    if not product: return self.send_json({'error':'Produit introuvable.'},404)
+                    b=label_pdf(product,count)
+                except (ValueError,TypeError,OverflowError) as e:
+                    return self.send_json({'error':str(e)},400)
+                self.send_response(200);self.send_header('Content-Type','application/pdf');self.send_header('Cache-Control','no-store')
+                self.send_header('Content-Disposition','attachment; filename="eco-mart-etiquettes-50x25mm.pdf"')
+                self.send_header('Content-Length',str(len(b)));self.end_headers();return self.wfile.write(b)
             if path=='/api/backup':
                 backup=sqlite3.connect(':memory:');c.backup(backup);b=backup.serialize();backup.close()
                 self.send_response(200);self.send_header('Content-Type','application/octet-stream');self.send_header('Content-Disposition','attachment; filename="eco-mart-backup.sqlite3"');self.send_header('Content-Length',str(len(b)));self.end_headers();return self.wfile.write(b)

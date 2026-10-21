@@ -20,7 +20,7 @@ Variables facultatives : `PORT` (8000), `HOST` (127.0.0.1), `POS_DB` (data/pos.s
 - Catalogue : ajout, modification, catégories, prix TTC, stock, archivage et historique des mouvements.
 - Caisse tactile : recherche, panier, quantités, scan, espèces avec monnaie rendue, carte et virement enregistrés après confirmation externe.
 - Transaction SQLite atomique : calcul serveur en centimes, contrôle du stock, numéro de ticket unique et protection contre les doubles soumissions.
-- Codes EAN-13 internes avec clé de contrôle et génération SVG sans service externe ; étiquettes 50 × 30 mm, 1 à 200 exemplaires. Préfixe 200 réservé ici à l’usage interne, sans prétention d’attribution GS1 pour vente dans d’autres commerces.
+- Codes EAN-13 internes avec clé de contrôle et génération SVG sans service externe ; étiquettes 50 × 25 mm, 1 à 200 exemplaires. Préfixe 200 réservé ici à l’usage interne, sans prétention d’attribution GS1 pour vente dans d’autres commerces.
 - Scan des codes numériques fabricants de 8, 12, 13 ou 14 chiffres. Impression d’étiquettes actuellement en EAN-13 uniquement.
 - Tickets avec coordonnées, BRN, date, client facultatif, articles, paiement, total et TVA configurable. Les tickets gardent les coordonnées et prix d’origine.
 - Historique, réimpression, remboursement intégral avec réintégration du stock et trace conservée. Effectuer également le remboursement effectif au client.
@@ -30,7 +30,7 @@ Variables facultatives : `PORT` (8000), `HOST` (127.0.0.1), `POS_DB` (data/pos.s
 ## Utilisation et matériel
 
 1. Ajouter les produits et le stock initial. Laisser le code vide pour générer un code interne, ou scanner le code fabricant dans le champ.
-2. Imprimer une étiquette test à 100 %, sans en-têtes ni pieds de page du navigateur. Sélectionner dans le pilote le papier 50 × 30 mm et les marges nulles. Vérifier physiquement la lecture avant un tirage.
+2. Imprimer une étiquette test à 100 %, sans en-têtes ni pieds de page du navigateur. Sélectionner dans le pilote le papier 50 × 25 mm et les marges nulles. Vérifier physiquement la lecture avant un tirage.
 3. Configurer le scanner USB en mode clavier, clavier compatible avec le poste, suffixe **Entrée**. Dans Point de vente, placer le curseur dans le champ de recherche avant de scanner. Une pression Entrée ajoute le produit correspondant.
 4. Encaisser, puis imprimer le ticket depuis son aperçu. Configurer le pilote de l’imprimante thermique en 58 ou 80 mm, selon le réglage de la caisse. Le pilote détermine le papier réel et la découpe.
 5. Sauvegarder quotidiennement sur un autre support. Pour restaurer : arrêter le serveur, préserver la base actuelle, remplacer le fichier `data/pos.sqlite3` par la sauvegarde, puis redémarrer et vérifier les dernières ventes. Protéger les sauvegardes qui contiennent les données clients et le hash du mot de passe.
@@ -67,3 +67,5 @@ Le test démarre son propre serveur avec une base temporaire, valide le parcours
 ## Hébergement Render
 
 Le déploiement public est décrit dans [DEPLOY_RENDER.md](DEPLOY_RENDER.md). Le fichier `render.yaml` configure un service Python avec Gunicorn, un contrôle de santé et un disque persistant. Ce service et son disque nécessitent un plan payant, à confirmer dans votre compte Render. Le premier compte est protégé par un code d’activation généré dans Render. La préparation du dépôt ne constitue pas un déploiement réussi ; l’adresse publique doit être obtenue et testée après création du service.
+
+Les étiquettes disposent aussi d’un téléchargement PDF vectoriel au format exact 50 × 25 mm, une page par étiquette. Dans le pilote, choisir le papier correspondant et une impression en taille réelle (100 %), sans en-têtes ni pieds de page. Le navigateur ne peut pas changer le format papier du pilote de l’imprimante.
