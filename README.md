@@ -69,3 +69,11 @@ Le test démarre son propre serveur avec une base temporaire, valide le parcours
 Le déploiement public est décrit dans [DEPLOY_RENDER.md](DEPLOY_RENDER.md). Le fichier `render.yaml` configure un service Python avec Gunicorn, un contrôle de santé et un disque persistant. Ce service et son disque nécessitent un plan payant, à confirmer dans votre compte Render. Le premier compte est protégé par un code d’activation généré dans Render. La préparation du dépôt ne constitue pas un déploiement réussi ; l’adresse publique doit être obtenue et testée après création du service.
 
 Les étiquettes disposent aussi d’un téléchargement PDF vectoriel au format exact 50 × 25 mm, une page par étiquette. Dans le pilote, choisir le papier correspondant et une impression en taille réelle (100 %), sans en-têtes ni pieds de page. Le navigateur ne peut pas changer le format papier du pilote de l’imprimante.
+
+## Lecteur reconnu sur le PC mais pas sur le POS
+
+Un scanner USB en mode clavier peut saisir `é`, `à`, `&`, etc. au lieu des chiffres si son pays clavier diffère de celui du terminal (QWERTY, AZERTY français ou belge). La caisse et le champ code-barres des produits reconnaissent les substitutions usuelles des touches numériques, tout en conservant les zéros initiaux. Les préfixes AIM EAN `]E0` / `]E4` et les suffixes Entrée/Tabulation sont pris en charge. Les lettres, URL et autres lectures non numériques ne sont pas converties arbitrairement en références produits.
+
+Dans **Point de vente → Tester le lecteur**, scanner dans le champ puis valider : l’outil montre le texte reçu, le code interprété et le produit trouvé. Il ne modifie pas le panier. Si le produit est inconnu, le catalogue partagé est rechargé avant de signaler l’absence. Pour corriger le paramétrage matériel, sélectionner dans la notice du lecteur le pays clavier correspondant à celui du POS et le suffixe Entrée. Le focus doit être dans le champ de recherche pour les ventes.
+
+Tests de normalisation : `node --test tests/scanner.test.cjs`. Le test navigateur couvre aussi un scan AZERTY et l’ajout depuis un deuxième poste.

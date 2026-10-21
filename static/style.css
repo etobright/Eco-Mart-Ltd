@@ -12,3 +12,4 @@
 
 /* Show the same physical proportions in the label preview. */
 .label-preview{box-sizing:border-box;width:50mm;height:25mm;padding:1mm;display:grid;grid-template-rows:3mm 14mm 4mm;row-gap:.25mm;justify-items:center;align-content:start;text-align:center;line-height:1;background:#fff;color:#000}.label-preview .barcode{display:block;width:46mm;height:14mm;margin:0}.label-preview .label-name{display:block;max-width:47mm;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:9px;line-height:3mm}.label-preview .label-price{font-size:12px;line-height:4mm;white-space:nowrap;color:#000}
+.pos-summary>#test-scanner{font-size:10px;min-height:30px;padding:2px 0;white-space:nowrap}.pos-summary>#test-scanner .ui-icon{width:14px;height:14px}#scanner-test-result code{overflow-wrap:anywhere;white-space:pre-wrap;color:#3a5930}@media(max-width:680px){.pos-summary>#test-scanner{font-size:9px}.pos-summary{gap:8px}.pos-summary .badge{display:none}}
