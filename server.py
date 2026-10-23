@@ -11,6 +11,11 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).parent
+# Content hashes change the asset URLs after each code update, including when
+# browsers retain an older stylesheet/script from a previous Render deployment.
+ASSET_VERSION = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in
+    ('static/app.js','static/style.css','static/scanner.js','server.py'))).hexdigest()[:12]
+APP_VERSION = os.environ.get('RENDER_GIT_COMMIT') or ASSET_VERSION
 DB = Path(os.environ.get('POS_DB', ROOT / 'data/pos.sqlite3'))
 SESSIONS = {}
 PUBLIC = os.environ.get("POS_PUBLIC") == "1"
@@ -55,12 +60,22 @@ def settings(c, private=False):
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self,*a,**kw): super().__init__(*a,directory=str(ROOT/'static'),**kw)
+    def send_head(self):
+        if self.path.split('?')[0] in ('/', '/index.html'):
+            body=(ROOT/'static/index.html').read_text().replace('__ASSET_VERSION__',ASSET_VERSION).encode()
+            self.send_response(200)
+            self.send_header('Content-Type','text/html; charset=utf-8')
+            self.send_header('Content-Length',str(len(body)))
+            self.end_headers()
+            return io.BytesIO(body)
+        return super().send_head()
     def log_message(self,fmt,*args): pass
     def send_json(self,data,status=200):
         b=json.dumps(data,ensure_ascii=False).encode();self.send_response(status)
-        self.send_header('Content-Type','application/json; charset=utf-8');self.send_header('Cache-Control','no-store')
+        self.send_header('Content-Type','application/json; charset=utf-8')
         self.send_header('Content-Length',str(len(b)));self.end_headers();self.wfile.write(b)
     def end_headers(self):
+        self.send_header('Cache-Control','no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'same-origin')
         self.send_header('X-Frame-Options', 'DENY')
@@ -81,9 +96,9 @@ class Handler(SimpleHTTPRequestHandler):
             if path=='/api/health':
                 c.execute('SELECT 1 FROM settings WHERE id=1').fetchone()
                 return self.send_json({'ok':True})
-            if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,authenticated=self.authenticated()))
+            if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,version=APP_VERSION,authenticated=self.authenticated()))
             if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
-            if path=='/api/state': return self.send_json(dict(settings=settings(c), products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,p.name FROM movements m JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
+            if path=='/api/state': return self.send_json(dict(settings=settings(c),version=APP_VERSION, products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,p.name FROM movements m JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
             if path=='/api/labels/pdf':
                 try:
                     query=parse_qs(urlsplit(self.path).query)
@@ -94,7 +109,7 @@ class Handler(SimpleHTTPRequestHandler):
                     b=label_pdf(product,count)
                 except (ValueError,TypeError,OverflowError) as e:
                     return self.send_json({'error':str(e)},400)
-                self.send_response(200);self.send_header('Content-Type','application/pdf');self.send_header('Cache-Control','no-store')
+                self.send_response(200);self.send_header('Content-Type','application/pdf')
                 self.send_header('Content-Disposition','attachment; filename="eco-mart-etiquettes-50x25mm.pdf"')
                 self.send_header('Content-Length',str(len(b)));self.end_headers();return self.wfile.write(b)
             if path=='/api/backup':

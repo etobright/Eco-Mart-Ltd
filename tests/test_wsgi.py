@@ -8,18 +8,24 @@ class PublicWSGI(unittest.TestCase):
 import io,json
 from wsgi import application
 cookie=''
-def call(path,data=None,method=None,origin=None):
+def call(path,data=None,method=None,origin=None,modified_since=None):
  global cookie
  raw=b'' if data is None else json.dumps(data).encode()
  env={'REQUEST_METHOD':method or ('GET' if data is None else 'POST'),'PATH_INFO':path,'wsgi.input':io.BytesIO(raw),'CONTENT_LENGTH':str(len(raw)),'CONTENT_TYPE':'application/json','HTTP_HOST':'eco.example','HTTP_COOKIE':cookie}
  if origin:env['HTTP_ORIGIN']=origin
+ if modified_since:env['HTTP_IF_MODIFIED_SINCE']=modified_since
  result={}
  def start(status,headers):result.update(status=int(status[:3]),headers=dict(headers))
  result['body']=b''.join(application(env,start))
  if 'Set-Cookie' in result['headers']:cookie=result['headers']['Set-Cookie'].split(';')[0]
  return result
 assert call('/api/health')['status']==200
-assert call('/')['status']==200
+home=call('/',modified_since='Wed, 31 Dec 2099 23:59:59 GMT')
+assert home['status']==200 and home['headers']['Cache-Control']=='no-store'
+assert b'__ASSET_VERSION__' not in home['body']
+assert b'/app.js?v=' in home['body'] and b'/style.css?v=' in home['body']
+assert call('/index.html')['body']==home['body']
+assert call('/app.js')['headers']['Cache-Control']=='no-store'
 assert call('/app.js')['status']==200
 assert call('/manifest.webmanifest')['status']==200
 assert call('/api/state')['status']==401

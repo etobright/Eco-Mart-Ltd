@@ -62,6 +62,7 @@ const assert=require('node:assert/strict');
    if(['labels','reports','settings'].includes(section)){
     await page.locator('#mobile-more').click();await page.locator('#mobile-more-content').waitFor();assert.equal(await page.locator('#mobile-more').getAttribute('aria-expanded'),'true');await page.locator(`#mobile-more-content [data-page=${section}]`).click();await page.waitForFunction(()=>!document.querySelector('dialog').open);
    }else await page.locator(`.mobile-bottom-nav [data-page=${section}]`).click();await page.waitForFunction(section=>document.title.startsWith(({dashboard:'Tableau de bord',pos:'Point de vente',products:'Produits',labels:'Codes-barres',sales:'Ventes',reports:'Rapports',settings:'Paramètres'})[section]),section);
+   if(section==='products')assert.ok(await page.locator('[data-product-status=archived]').isVisible());
    assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`Horizontal overflow: ${section}`);
    assert.ok(await page.locator('.mobile-bottom-nav').evaluate(el=>Math.abs(el.getBoundingClientRect().bottom-window.innerHeight)<1),'Mobile tabs must stay at the bottom');
    if(section==='pos')assert.ok(await page.locator('#mobile-cart').evaluate(el=>el.getBoundingClientRect().bottom<document.querySelector('.mobile-bottom-nav').getBoundingClientRect().top),'Cart must sit above bottom tabs');
