@@ -195,7 +195,7 @@ class Handler(SimpleHTTPRequestHandler):
                         if c.execute('SELECT 1 FROM users').fetchone(): raise ValueError('Compte déjà créé.')
                         if PUBLIC and not hmac.compare_digest(str(d.get('setup_token','')),os.environ['POS_SETUP_TOKEN']):
                             return self.send_json({'error':'Code d’activation incorrect. Consultez POS_SETUP_TOKEN dans votre tableau de bord Render.'},403)
-                        if len(p)<10: raise ValueError('Choisissez au moins 10 caractères.')
+                        if not re.fullmatch(r'[0-9]{5}',p): raise ValueError('Choisissez un code de 5 chiffres exactement.')
                         username=valid_username(d.get('username','admin'))
                         c.execute("INSERT INTO users(username,name,role,password_hash,created) VALUES(?,?,'admin',?,?)",(username,'Administrateur',password_hash(p),now()))
                     user=c.execute('SELECT * FROM users WHERE username=? AND active=1',(str(d.get('username','admin')).strip().lower(),)).fetchone()
@@ -222,7 +222,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if c.execute('SELECT 1 FROM users WHERE username=? AND id!=?',(username,uid or 0)).fetchone(): raise ValueError('Cet identifiant est déjà utilisé.')
                     if old and old['role']=='admin' and old['active'] and (role!='admin' or not active) and c.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1").fetchone()[0]<=1: raise ValueError('Conservez au moins un administrateur actif.')
                     password=str(d.get('password',''))
-                    if (not uid or password) and not 10<=len(password)<=200: raise ValueError('Mot de passe : entre 10 et 200 caractères.')
+                    if (not uid or password) and not re.fullmatch(r'[0-9]{5}',password): raise ValueError('Le code doit contenir exactement 5 chiffres.')
                     if uid:
                         c.execute('UPDATE users SET username=?,name=?,role=?,active=?,auth_version=auth_version+1 WHERE id=?',(username,name,role,int(active),uid))
                         if password: c.execute('UPDATE users SET password_hash=? WHERE id=?',(password_hash(password),uid))

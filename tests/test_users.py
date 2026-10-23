@@ -18,12 +18,16 @@ class Accounts(unittest.TestCase):
     for _ in range(100):
      try:call(admin,'status');break
      except OSError:time.sleep(.03)
-    call(admin,'setup',{'password':'admin-test-password'})
-    call(admin,'users/save',{'username':'caisse1','name':'Alice','role':'cashier','password':'cashier-test-password'})
-    call(admin,'users/save',{'username':'caisse2','name':'Bob','role':'cashier','password':'cashier-test-password'})
-    denied(admin,'users/save',{'username':'CAISSE1','name':'Duplicate','password':'cashier-test-password'},400)
-    call(cashier,'login',{'username':'CAISSE1','password':'cashier-test-password'})
-    call(other,'login',{'username':'caisse2','password':'cashier-test-password'})
+    for code in ['1234','123456','abcde','12 34','１２３４５']:
+     denied(admin,'setup',{'password':code},400)
+    call(admin,'setup',{'password':'12345'})
+    for code in ['1234','123456','abcde','12 34','１２３４５']:
+     denied(admin,'users/save',{'username':'invalid','name':'Invalid','password':code},400)
+    call(admin,'users/save',{'username':'caisse1','name':'Alice','role':'cashier','password':'01234'})
+    call(admin,'users/save',{'username':'caisse2','name':'Bob','role':'cashier','password':'01234'})
+    denied(admin,'users/save',{'username':'CAISSE1','name':'Duplicate','password':'01234'},400)
+    call(cashier,'login',{'username':'CAISSE1','password':'01234'})
+    call(other,'login',{'username':'caisse2','password':'01234'})
     call(admin,'product',{'name':'Savon','price':'100','stock':'20','barcode':''})
     pid=call(admin,'state')['products'][0]['id']
     sale={'lines':[{'id':pid,'qty':1}],'payment':'Carte','request_key':'alice-sale','cashier_id':1,'cashier_name':'Forged'}
@@ -37,11 +41,11 @@ class Accounts(unittest.TestCase):
     users=call(admin,'state')['users'];alice=next(u for u in users if u['username']=='caisse1');admin_user=next(u for u in users if u['role']=='admin')
     denied(admin,'users/save',{**admin_user,'active':False},400)
     call(admin,'users/save',{**alice,'active':False})
-    denied(cashier,'state',status=401);denied(cashier,'login',{'username':'caisse1','password':'cashier-test-password'},401)
-    call(admin,'users/save',{**alice,'active':True,'password':'replacement-test-password'})
-    denied(cashier,'login',{'username':'caisse1','password':'cashier-test-password'},401)
-    call(cashier,'login',{'username':'caisse1','password':'replacement-test-password'})
-    call(admin,'users/save',{**alice,'active':True,'password':'another-test-password'})
+    denied(cashier,'state',status=401);denied(cashier,'login',{'username':'caisse1','password':'01234'},401)
+    call(admin,'users/save',{**alice,'active':True,'password':'54321'})
+    denied(cashier,'login',{'username':'caisse1','password':'01234'},401)
+    call(cashier,'login',{'username':'caisse1','password':'54321'})
+    call(admin,'users/save',{**alice,'active':True,'password':'98765'})
     denied(cashier,'state',status=401)
     self.assertEqual(call(admin,'state')['sales'][1]['cashier_name'],'Alice')
    finally:process.terminate();process.wait()

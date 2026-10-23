@@ -11,7 +11,7 @@ cd /workspace/Eco-Mart-Ltd
 python3 server.py
 ```
 
-Sur le poste qui exécute le serveur, ouvrir le navigateur à l’adresse locale affichée par la commande. Créer un mot de passe administrateur d’au moins 10 caractères au premier démarrage. Le premier démarrage doit être effectué sur le poste de confiance. Le serveur écoute uniquement sur la boucle locale par défaut. Ne pas exposer ce serveur HTTP directement sur Internet. Une utilisation distante nécessite HTTPS et une configuration de déploiement adaptée. Le mot de passe est haché par PBKDF2, les sessions expirent après 12 heures et après redémarrage.
+Sur le poste qui exécute le serveur, ouvrir le navigateur à l’adresse locale affichée par la commande. Créer un code administrateur de 5 chiffres au premier démarrage. Le premier démarrage doit être effectué sur le poste de confiance. Le serveur écoute uniquement sur la boucle locale par défaut. Ne pas exposer ce serveur HTTP directement sur Internet. Une utilisation distante nécessite HTTPS et une configuration de déploiement adaptée. Le mot de passe est haché par PBKDF2, les sessions expirent après 12 heures et après redémarrage.
 
 Variables facultatives : `PORT` (8000), `HOST` (127.0.0.1), `POS_DB` (data/pos.sqlite3). La base doit rester sur un disque local persistant accessible en écriture.
 
@@ -119,9 +119,11 @@ Les rapports déduisent les retours à la date effective du remboursement. L’e
 
 ## Comptes de l’équipe
 
-Dans **Équipe & accès**, un administrateur peut créer un compte avec nom, identifiant unique, mot de passe (10 à 200 caractères), rôle et statut. Sur téléphone, cette rubrique est dans **Plus**. Le bouton **Modifier / Mot de passe** permet de réinitialiser le mot de passe ou de désactiver un accès. Chaque modification du compte invalide ses sessions immédiatement ; au moins un administrateur actif doit rester présent.
+Dans **Équipe & accès**, un administrateur peut créer un compte avec nom, identifiant unique, code de connexion (exactement 5 chiffres), rôle et statut. Sur téléphone, cette rubrique est dans **Plus**. Le bouton **Modifier / Mot de passe** permet de réinitialiser le mot de passe ou de désactiver un accès. Chaque modification du compte invalide ses sessions immédiatement ; au moins un administrateur actif doit rester présent.
 
 - **Administrateur** : tous les écrans, tous les tickets, catalogue, retours, rapports, paramètres, sauvegardes et gestion des comptes.
 - **Caissier** : point de vente et consultation/réimpression de ses propres tickets ; aucun accès aux fonctions de gestion ou aux tickets des autres caissiers. Les droits sont contrôlés côté serveur.
 
 À la mise à jour, le compte administrateur existant devient **admin**, avec son mot de passe habituel. Aucune nouvelle activation Render n’est nécessaire. Les nouvelles installations choisissent leur premier identifiant au démarrage. Les anciennes ventes restent sans attribution ; chaque nouvelle vente conserve l’identifiant et le nom du caissier au moment de l’encaissement, également imprimé sur le ticket. Les retours conservent l’administrateur qui les a enregistrés. Les mots de passe sont stockés sous forme d’empreintes PBKDF2, jamais renvoyés à l’interface.
+
+Les nouveaux codes et les réinitialisations exigent exactement 5 chiffres, y compris les zéros initiaux. Les anciens mots de passe restent valables à la connexion jusqu’à leur remplacement depuis Équipe & accès.

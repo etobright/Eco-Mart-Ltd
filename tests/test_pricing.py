@@ -24,7 +24,7 @@ class Pricing(unittest.TestCase):
     for _ in range(80):
      try:call('status');break
      except OSError:time.sleep(.03)
-    call('setup',{'password':'discount-test-password'})
+    call('setup',{'password':'12345'})
     call('product',{'name':'Savon','price':'100','stock':'100','barcode':''})
     call('product',{'name':'Riz','price':'200','stock':'100','barcode':''})
     state=call('state');products={item['name']:item for item in state['products']}

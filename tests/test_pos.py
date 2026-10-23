@@ -19,7 +19,7 @@ class POS(unittest.TestCase):
  def test_workflow(self):
   self.assertTrue(self.call('status')['setup'])
   with self.assertRaises(urllib.error.HTTPError):self.call('state')
-  self.call('setup',{'password':'test-password-123'})
+  self.call('setup',{'password':'12345'})
   self.call('product',dict(name='Riz',category='Épicerie',price='42.50',stock='10',barcode=''))
   p=self.call('state')['products'][0];self.assertEqual(len(p['barcode']),13)
   with self.assertRaises(urllib.error.HTTPError):self.call('product',dict(name='Duplicata',price='2',stock='1',barcode=p['barcode']))
@@ -52,7 +52,7 @@ class POS(unittest.TestCase):
   with self.assertRaises(urllib.error.HTTPError):self.call('restore',{'id':99999})
   self.call('logout',{})
   with self.assertRaises(urllib.error.HTTPError):self.call('state')
-  self.call('login',{'password':'test-password-123'})
+  self.call('login',{'password':'12345'})
   self.assertEqual(len(self.call('state')['sales']),2)
   sales_before=self.call('state')['sales']
   with self.assertRaises(urllib.error.HTTPError):self.call('delete-product',{'id':p['id'],'barcode':p['barcode']})

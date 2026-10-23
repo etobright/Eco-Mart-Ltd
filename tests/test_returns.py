@@ -21,7 +21,7 @@ class PartialReturns(unittest.TestCase):
     for _ in range(100):
      try:call('status');break
      except OSError:time.sleep(.03)
-    call('setup',{'password':'partial-return-test'})
+    call('setup',{'password':'12345'})
     call('product',{'name':'Savon','price':'100','stock':'20','barcode':''});call('product',{'name':'Riz','price':'200','stock':'20','barcode':''})
     state=call('state');products={p['name']:p for p in state['products']};st=state['settings'];call('settings',{**st,'vat_number':'TEST','vat_rate':'15'})
     sid=call('sale',{'request_key':'original-sale','lines':[{'id':products['Savon']['id'],'qty':6},{'id':products['Riz']['id'],'qty':1}],'payment':'Espèces','tendered':'800'})['id']

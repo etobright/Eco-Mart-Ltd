@@ -31,9 +31,9 @@ assert call('/manifest.webmanifest')['status']==200
 assert call('/api/state')['status']==401
 assert call('/api/labels/pdf')['status']==401
 status=json.loads(call('/api/status')['body']);assert status['setup'] and status['setup_requires_token']
-assert call('/api/setup',{'password':'a-long-test-password'})['status']==403
-assert call('/api/setup',{'password':'a-long-test-password','setup_token':'test-activation-token-long-enough'},origin='https://evil.example')['status']==403
-setup=call('/api/setup',{'password':'a-long-test-password','setup_token':'test-activation-token-long-enough'},origin='https://eco.example')
+assert call('/api/setup',{'password':'12345'})['status']==403
+assert call('/api/setup',{'password':'12345','setup_token':'test-activation-token-long-enough'},origin='https://evil.example')['status']==403
+setup=call('/api/setup',{'password':'12345','setup_token':'test-activation-token-long-enough'},origin='https://eco.example')
 assert setup['status']==200,setup
 assert 'Secure' in setup['headers']['Set-Cookie']
 assert 'HttpOnly' in setup['headers']['Set-Cookie']
@@ -59,7 +59,7 @@ state=json.loads(call('/api/state')['body']);assert len(state['refunds'])==1 and
 assert call('/api/backup')['body'].startswith(b'SQLite format 3')
 assert call('/api/logout',{})['status']==200
 assert call('/api/state')['status']==401
-assert call('/api/login',{'password':'a-long-test-password'})['status']==200
+assert call('/api/login',{'password':'12345'})['status']==200
 assert len(json.loads(call('/api/state')['body'])['sales'])==1
 print('Public WSGI workflow passed')
 '''
