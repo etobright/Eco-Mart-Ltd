@@ -12,6 +12,11 @@ class DeletionMigration(unittest.TestCase):
     INSERT INTO products VALUES(42,'Ancien produit','2001948374145','Épicerie',1000,6,1);
     INSERT INTO movements VALUES(8,42,6,'Inventaire','2026-10-01');
     ''')
+   # A receipt created before the promotion, even with six units, stays unchanged.
+   with sqlite3.connect(db) as c:
+    c.execute("CREATE TABLE sales (id INTEGER PRIMARY KEY,reference TEXT UNIQUE NOT NULL,created TEXT NOT NULL,total INTEGER NOT NULL,tax INTEGER NOT NULL,payment TEXT NOT NULL,tendered INTEGER NOT NULL,customer TEXT NOT NULL,lines TEXT NOT NULL,company TEXT NOT NULL,refunded INTEGER NOT NULL DEFAULT 0,refund_at TEXT,request_key TEXT UNIQUE NOT NULL)")
+    legacy_lines=json.dumps([{'id':42,'name':'Ancien produit','barcode':'2001948374145','qty':6,'price':1000}])
+    c.execute("INSERT INTO sales(id,reference,created,total,tax,payment,tendered,customer,lines,company,request_key) VALUES(1,'OLD-1','2026-10-01',6000,0,'Carte',6000,'',?,'{}','old-request')",(legacy_lines,))
    result=subprocess.run(['python3','-c','import server; server.init(); server.init()'],cwd=ROOT,env={**os.environ,'POS_DB':str(db),'POS_PUBLIC':'0'},capture_output=True,text=True)
    self.assertEqual(result.returncode,0,result.stderr)
    backups=list(Path(tmp).glob('*.bak'));self.assertEqual(len(backups),1)
@@ -21,6 +26,7 @@ class DeletionMigration(unittest.TestCase):
     self.assertEqual(c.execute('SELECT id,barcode,stock FROM products').fetchone(),(42,'2001948374145',6))
     self.assertEqual(c.execute('SELECT product_id,product_name,quantity FROM movements').fetchone(),(42,'Ancien produit',6))
     self.assertEqual(c.execute('SELECT next_id FROM product_ids').fetchone()[0],43)
+    self.assertEqual(c.execute('SELECT total,pricing,lines FROM sales').fetchone(),(6000,'{}',legacy_lines))
     c.execute('DELETE FROM products WHERE id=42')
     self.assertEqual(c.execute('SELECT product_id,product_name FROM movements').fetchone(),(None,'Ancien produit'))
     self.assertEqual(c.execute('PRAGMA foreign_key_check').fetchall(),[])

@@ -48,7 +48,7 @@ Le test d’intégration utilise une base temporaire et exerce connexion, créat
 
 ## Limites à traiter avant déploiement en magasin
 
-Le matériel physique n’a pas été fourni : scanner, qualité des étiquettes, impression thermique et découpe doivent être validés sur les modèles retenus. L’ouverture automatique du tiroir, l’impression silencieuse et ESC/POS/ZPL nécessitent une passerelle ou un pilote adapté. Il n’existe pas encore d’intégration bancaire, de gestion des comptes caissiers et de leurs rôles, de clôtures de caisse, de retours partiels, de vente au poids, de remises ou de synchronisation entre magasins. La version actuelle utilise un seul compte administrateur ; les paiements carte et virement sont un enregistrement, pas un débit bancaire. Une mise en production demande ces décisions métier et la validation fiscale des reçus.
+Le matériel physique n’a pas été fourni : scanner, qualité des étiquettes, impression thermique et découpe doivent être validés sur les modèles retenus. L’ouverture automatique du tiroir, l’impression silencieuse et ESC/POS/ZPL nécessitent une passerelle ou un pilote adapté. Il n’existe pas encore d’intégration bancaire, de gestion des comptes caissiers et de leurs rôles, de clôtures de caisse, de retours partiels, de vente au poids, de remises manuelles ou de synchronisation entre magasins. La version actuelle utilise un seul compte administrateur ; les paiements carte et virement sont un enregistrement, pas un débit bancaire. Une mise en production demande ces décisions métier et la validation fiscale des reçus.
 
 ## Interface web
 
@@ -93,3 +93,13 @@ Pour un produit actif : **Modifier → Supprimer définitivement**. Pour un prod
 Les tickets et mouvements historiques restent conservés, avec les informations d’origine : la suppression du catalogue n’efface donc pas les codes figurant sur les anciens tickets. Un remboursement reste possible après suppression ; les produits supprimés ne sont pas remis en stock et la nouvelle fiche éventuellement créée avec le même code ne reçoit pas ce retour. Les identifiants de produits ne sont jamais réutilisés.
 
 Au premier démarrage sur une ancienne base, la migration conserve les mouvements, rend leur lien produit facultatif et crée auparavant une sauvegarde locale `pos.sqlite3.before-delete-migration-*.bak` à côté de la base. Ne pas restaurer cette sauvegarde sur le service en cours sans arrêter celui-ci et préserver les ventes plus récentes. La migration et son redémarrage sont couverts par un test sur une base au format précédent.
+
+## Remise automatique par quantité
+
+Dès qu’une ligne du panier contient **6 unités ou plus d’un même produit**, une remise de **15 %** s’applique au total de cette ligne. Les autres produits ne sont pas remisés tant qu’ils n’atteignent pas eux-mêmes ce seuil. Exemple : 6 savons à Rs 100 et un riz à Rs 200 donnent **Rs 710** à payer (Rs 510 + Rs 200).
+
+La remise est unique et ne se cumule pas à chaque groupe de six : 12 unités du même produit bénéficient de 15 %, pas de 30 %. Elle disparaît automatiquement quand la quantité repasse sous six. Chaque montant de remise est arrondi au centime sur sa ligne, puis additionné. La TVA incluse, le paiement, la monnaie et le remboursement reposent sur le montant effectivement facturé après remise. Le serveur vérifie le calcul et ignore les remises arbitraires envoyées par le navigateur.
+
+Le panier et le ticket détaillent les remises ; l’export CSV contient le sous-total avant remise et la remise totale. Chaque vente conserve son calcul d’origine dans `pricing`, y compris pour les réimpressions et remboursements. L’ajout de ce champ ne recalcule pas les anciens tickets.
+
+Tests de tarification : `node --test tests/pricing.test.cjs` et `python3 -m unittest discover -s tests -v`. Les tests couvrent les seuils 5/6/7/12, les paniers mixtes, les arrondis, les paiements, la TVA, la déduplication et les remboursements.
