@@ -83,7 +83,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({'ok':True})
             if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,authenticated=self.authenticated()))
             if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
-            if path=='/api/state': return self.send_json(dict(settings=settings(c), products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,p.name FROM movements m JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
+            if path=='/api/state': return self.send_json(dict(settings=settings(c), products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,p.name FROM movements m JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
             if path=='/api/labels/pdf':
                 try:
                     query=parse_qs(urlsplit(self.path).query)
@@ -143,6 +143,11 @@ class Handler(SimpleHTTPRequestHandler):
                             if not c.execute('SELECT 1 FROM products WHERE barcode=?',(barcode,)).fetchone(): break
                     if not barcode.isascii() or not barcode.isdigit() or len(barcode) not in (8,12,13,14): raise ValueError('Code numérique de 8, 12, 13 ou 14 chiffres requis.')
                     if len(barcode)==13 and checksum(barcode[:12])!=barcode[-1]: raise ValueError('Clé EAN-13 invalide.')
+                    if pid: pid=integer(pid,1)
+                    duplicate=c.execute('SELECT id,name,active FROM products WHERE barcode=? AND id!=?',(barcode,pid or 0)).fetchone()
+                    if duplicate:
+                        archived=not duplicate['active']
+                        return self.send_json({'error':('Ce code-barres appartient à un produit archivé. Réactivez-le pour le remettre en vente.' if archived else 'Ce code-barres appartient déjà à un produit actif. Modifiez le produit existant.'),'code':('archived_barcode' if archived else 'duplicate_barcode'),'product_id':duplicate['id']},409)
                     if pid:
                         old=c.execute('SELECT stock FROM products WHERE id=? AND active=1',(pid,)).fetchone()
                         if not old: raise ValueError('Produit introuvable.')
@@ -151,6 +156,10 @@ class Handler(SimpleHTTPRequestHandler):
                         pid=c.execute('INSERT INTO products(name,category,price,stock,barcode) VALUES(?,?,?,?,?)',(name,category,price,stock,barcode)).lastrowid;delta=stock
                     if delta: c.execute('INSERT INTO movements(product_id,quantity,reason,created) VALUES(?,?,?,?)',(pid,delta,'Inventaire / réception',now()))
                 elif path=='/api/archive': c.execute('UPDATE products SET active=0 WHERE id=?',(integer(d['id'],1),))
+                elif path=='/api/restore':
+                    pid=integer(d['id'],1)
+                    if not c.execute('SELECT id FROM products WHERE id=?',(pid,)).fetchone(): return self.send_json({'error':'Produit introuvable.'},404)
+                    c.execute('UPDATE products SET active=1 WHERE id=?',(pid,))
                 elif path=='/api/sale':
                     key=str(d['request_key'])[:100]
                     existing=c.execute('SELECT id FROM sales WHERE request_key=?',(key,)).fetchone()

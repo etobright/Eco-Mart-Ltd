@@ -79,3 +79,7 @@ Dans **Point de vente → Tester le lecteur**, scanner dans le champ puis valide
 Tests de normalisation : `node --test tests/scanner.test.cjs`. Le test navigateur couvre aussi un scan AZERTY et l’ajout depuis un deuxième poste.
 
 Sur téléphone (jusqu’à 680 px de largeur), la navigation prend la forme d’une barre fixe en bas : **Accueil, Produits, Caisse, Ventes, Plus**. Le menu Plus ouvre un panneau avec Codes-barres, Rapports, Paramètres et Déconnexion. Le bouton du compte en haut ouvre le même panneau. Le panier reste au-dessus de la barre et les marges prennent en compte la zone de sécurité du téléphone. Les écrans PC et tablette conservent leur présentation existante. L’ouverture de la caisse sur téléphone ne déclenche pas automatiquement le clavier virtuel.
+
+## Réactiver un produit archivé
+
+Dans **Produits & stock**, les onglets **Actifs** et **Archivés** permettent de retrouver les deux listes. **Réactiver** remet le produit existant en vente avec le même identifiant, code-barres, stock et historique, puis ouvre sa fiche pour vérifier prix et quantité. Si un ajout utilise le code d’un produit archivé, le formulaire propose directement de le réactiver. Aucune vente passée et aucun mouvement de stock ne sont supprimés ou recréés pendant cette opération. L’archivage masque le produit en caisse et conserve son code pour cette réactivation.
