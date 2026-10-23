@@ -52,6 +52,10 @@ assert b'/MediaBox [0 0 141.732283 70.866142]' in pdf
 pdf_env['QUERY_STRING']=f'id={product["id"]}&count=201'
 b''.join(application(pdf_env,pdf_start));assert pdf_result['status']==400
 assert call('/api/sale',{'request_key':'render-test','lines':[{'id':product['id'],'qty':1,'expected_price':5000}],'payment':'Carte','tendered':'0'})['status']==200
+sid=json.loads(call('/api/state')['body'])['sales'][0]['id']
+credit=call('/api/returns',{'sale_id':sid,'request_key':'wsgi-return-check','items':[{'line_index':0,'qty':1,'restock':False}],'method':'Carte','expected_total':5000})
+assert credit['status']==200 and json.loads(credit['body'])['total']==5000
+state=json.loads(call('/api/state')['body']);assert len(state['refunds'])==1 and state['sales'][0]['refunded']
 assert call('/api/backup')['body'].startswith(b'SQLite format 3')
 assert call('/api/logout',{})['status']==200
 assert call('/api/state')['status']==401

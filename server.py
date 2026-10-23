@@ -5,6 +5,7 @@ from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlsplit
 from labels import label_pdf
 from pricing import PROMOTION, quote
+from returns import sale_items, prepare as prepare_return
 from pathlib import Path
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -15,7 +16,7 @@ ROOT = Path(__file__).parent
 # Content hashes change the asset URLs after each code update, including when
 # browsers retain an older stylesheet/script from a previous Render deployment.
 ASSET_VERSION = hashlib.sha256(b''.join((ROOT / name).read_bytes() for name in
-    ('static/app.js','static/style.css','static/scanner.js','static/pricing.js','server.py','pricing.py'))).hexdigest()[:12]
+    ('static/app.js','static/style.css','static/scanner.js','static/pricing.js','server.py','pricing.py','returns.py'))).hexdigest()[:12]
 APP_VERSION = os.environ.get('RENDER_GIT_COMMIT') or ASSET_VERSION
 DB = Path(os.environ.get('POS_DB', ROOT / 'data/pos.sqlite3'))
 SESSIONS = {}
@@ -40,6 +41,8 @@ def init():
         CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY, reference TEXT UNIQUE NOT NULL, created TEXT NOT NULL, total INTEGER NOT NULL, tax INTEGER NOT NULL, payment TEXT NOT NULL, tendered INTEGER NOT NULL, customer TEXT NOT NULL, lines TEXT NOT NULL, company TEXT NOT NULL, refunded INTEGER NOT NULL DEFAULT 0, refund_at TEXT, request_key TEXT UNIQUE NOT NULL, pricing TEXT NOT NULL DEFAULT '{}');
         CREATE TABLE IF NOT EXISTS movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE SET NULL, product_name TEXT NOT NULL, quantity INTEGER NOT NULL, reason TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS product_ids (id INTEGER PRIMARY KEY CHECK(id=1), next_id INTEGER NOT NULL);
+        CREATE TABLE IF NOT EXISTS refunds (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL REFERENCES sales(id), reference TEXT NOT NULL UNIQUE, created TEXT NOT NULL, total INTEGER NOT NULL, tax INTEGER NOT NULL, method TEXT NOT NULL, reason TEXT NOT NULL, lines TEXT NOT NULL, request_key TEXT NOT NULL UNIQUE, request_hash TEXT NOT NULL, legacy INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS refunds_sale_id ON refunds(sale_id);
         ''')
         if 'product_name' not in {r['name'] for r in c.execute('PRAGMA table_info(movements)')}:
             backup_path=DB.with_name(DB.name+'.before-delete-migration-'+secrets.token_hex(4)+'.bak')
@@ -52,6 +55,11 @@ def init():
             c.execute('ALTER TABLE movements_new RENAME TO movements')
         if 'pricing' not in {r['name'] for r in c.execute('PRAGMA table_info(sales)')}:
             c.execute("ALTER TABLE sales ADD COLUMN pricing TEXT NOT NULL DEFAULT '{}'")
+        # Existing full refunds become ledger entries without touching stock again.
+        for sale in c.execute('SELECT * FROM sales WHERE refunded=1 AND NOT EXISTS(SELECT 1 FROM refunds WHERE sale_id=sales.id)').fetchall():
+            lines,paid=sale_items(sale)
+            items=[dict(line_index=i,product_id=line['id'],name=line['name'],barcode=line.get('barcode',''),qty=line['qty'],amount=paid[i],restock_requested=None,restocked=None) for i,line in enumerate(lines)]
+            c.execute('INSERT INTO refunds(sale_id,reference,created,total,tax,method,reason,lines,request_key,request_hash,legacy) VALUES(?,?,?,?,?,?,?,?,?,?,1)',(sale['id'],'RET-'+sale['reference'],sale['refund_at'] or sale['created'],sale['total'],sale['tax'],sale['payment'],'Ancien remboursement intégral',json.dumps(items),'legacy-full-'+str(sale['id']),'legacy'))
         c.execute('INSERT OR IGNORE INTO product_ids VALUES(1,(SELECT COALESCE(MAX(id),0)+1 FROM products))')
         c.execute('UPDATE product_ids SET next_id=MAX(next_id,(SELECT COALESCE(MAX(id),0)+1 FROM products)) WHERE id=1')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)', (json.dumps(dict(name='Eco Mart Ltd', address="Royal Road, L’Escalier, Mauritius",brn='C26238002',phone='',vat_number='',vat_rate='0',footer='Merci pour votre visite !',paper='80',password_hash='')),))
@@ -117,7 +125,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({'ok':True})
             if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,version=APP_VERSION,authenticated=self.authenticated()))
             if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
-            if path=='/api/state': return self.send_json(dict(settings=settings(c),version=APP_VERSION,promotion=PROMOTION, products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,COALESCE(p.name,m.product_name) AS name FROM movements m LEFT JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
+            if path=='/api/state': return self.send_json(dict(settings=settings(c),version=APP_VERSION,promotion=PROMOTION, products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],refunds=[dict(r) for r in c.execute('SELECT * FROM refunds ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,COALESCE(p.name,m.product_name) AS name FROM movements m LEFT JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
             if path=='/api/labels/pdf':
                 try:
                     query=parse_qs(urlsplit(self.path).query)
@@ -228,20 +236,43 @@ class Handler(SimpleHTTPRequestHandler):
                     company=settings(c);ref='EM-'+datetime.now(ZoneInfo('Indian/Mauritius')).strftime('%Y%m%d')+'-'+secrets.token_hex(4).upper()
                     saleid=c.execute('INSERT INTO sales(reference,created,total,tax,payment,tendered,customer,lines,company,request_key,pricing) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(ref,now(),total,tax,payment,tendered,str(d.get('customer',''))[:200],json.dumps(lines),json.dumps(company),key,json.dumps(pricing))).lastrowid
                     c.commit();return self.send_json({'id':saleid})
-                elif path=='/api/refund':
-                    sale=c.execute('SELECT * FROM sales WHERE id=?',(integer(d['id'],1),)).fetchone()
-                    if not sale or sale['refunded']: raise ValueError('Vente introuvable ou déjà remboursée.')
+                elif path in ('/api/returns','/api/refund'):
+                    legacy=path=='/api/refund'
+                    sid=integer(d['id'] if legacy else d['sale_id'],1)
+                    key=str(d.get('request_key',''))
+                    if not legacy and not 8<=len(key)<=100: raise ValueError('Identifiant de retour invalide.')
+                    key=key or secrets.token_urlsafe(24)
+                    digest=hashlib.sha256(json.dumps(d,sort_keys=True,ensure_ascii=True).encode()).hexdigest()
+                    existing=c.execute('SELECT * FROM refunds WHERE request_key=?',(key,)).fetchone()
+                    if existing:
+                        if existing['sale_id']!=sid or existing['request_hash']!=digest: return self.send_json({'error':'Cet identifiant de retour a déjà été utilisé pour une autre demande.'},409)
+                        skipped=[{'name':i['name'],'qty':i['qty']} for i in json.loads(existing['lines']) if i['restock_requested'] and not i['restocked']]
+                        return self.send_json({'ok':True,'refund_id':existing['id'],'total':existing['total'],'skipped_restock':skipped})
+                    sale=c.execute('SELECT * FROM sales WHERE id=?',(sid,)).fetchone()
+                    if not sale: raise ValueError('Vente introuvable.')
+                    records=c.execute('SELECT * FROM refunds WHERE sale_id=? ORDER BY id',(sid,)).fetchall()
+                    if legacy and records: raise ValueError('Ce ticket a déjà un retour. Utilisez « Retour / Retirer des articles » pour les quantités restantes.')
+                    requested=d.get('items')
+                    if legacy: requested=[{'line_index':i,'qty':line['qty'],'restock':True} for i,line in enumerate(json.loads(sale['lines']))]
+                    items,total,tax,fully_returned=prepare_return(sale,records,requested)
+                    if 'expected_total' in d and d['expected_total']!=total: return self.send_json({'error':'Le montant a changé après un autre retour. Rouvrez le ticket et vérifiez les quantités.'},409)
+                    method=sale['payment'] if legacy else d.get('method')
+                    if method not in ['Espèces','Carte','Virement']: raise ValueError('Mode de remboursement invalide.')
+                    reason=str(d.get('reason','Retour client')).strip()[:300] or 'Retour client'
+                    reference='RET-'+datetime.now(ZoneInfo('Indian/Mauritius')).strftime('%Y%m%d')+'-'+secrets.token_hex(4).upper()
                     skipped=[]
-                    for item in json.loads(sale['lines']):
-                        product=c.execute('SELECT id FROM products WHERE id=?',(item['id'],)).fetchone()
-                        if product:
-                            c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['qty'],item['id']))
-                            movement(c,item['id'],item['qty'],'Remboursement '+sale['reference'])
+                    for item in items:
+                        product=c.execute('SELECT id FROM products WHERE id=?',(item['product_id'],)).fetchone()
+                        item['restocked']=bool(item['restock_requested'] and product)
+                        if item['restocked']:
+                            c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['qty'],item['product_id']))
+                            movement(c,item['product_id'],item['qty'],'Retour '+reference)
                         else:
-                            skipped.append({'name':item['name'],'qty':item['qty']})
-                            movement(c,None,0,'Remboursement '+sale['reference']+' — fiche supprimée, sans remise en stock',item['name'])
-                    c.execute('UPDATE sales SET refunded=1,refund_at=? WHERE id=?',(now(),sale['id']))
-                    c.commit();return self.send_json({'ok':True,'skipped_restock':skipped})
+                            if item['restock_requested']: skipped.append({'name':item['name'],'qty':item['qty']})
+                            movement(c,item['product_id'] if product else None,0,'Retour '+reference+' — '+str(item['qty'])+' unité(s) sans remise en stock',item['name'])
+                    rid=c.execute('INSERT INTO refunds(sale_id,reference,created,total,tax,method,reason,lines,request_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?,?)',(sid,reference,now(),total,tax,method,reason,json.dumps(items),key,digest)).lastrowid
+                    if fully_returned: c.execute('UPDATE sales SET refunded=1,refund_at=? WHERE id=?',(now(),sid))
+                    c.commit();return self.send_json({'ok':True,'refund_id':rid,'total':total,'skipped_restock':skipped})
                 elif path=='/api/settings':
                     for k in ['name','address','brn','phone','vat_number','footer']: s[k]=str(d.get(k,s[k])).strip()[:300]
                     rate=Decimal(str(d['vat_rate']))

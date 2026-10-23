@@ -23,7 +23,7 @@ Variables facultatives : `PORT` (8000), `HOST` (127.0.0.1), `POS_DB` (data/pos.s
 - Codes EAN-13 internes avec clé de contrôle et génération SVG sans service externe ; étiquettes 50 × 25 mm, 1 à 200 exemplaires. Préfixe 200 réservé ici à l’usage interne, sans prétention d’attribution GS1 pour vente dans d’autres commerces.
 - Scan des codes numériques fabricants de 8, 12, 13 ou 14 chiffres. Impression d’étiquettes actuellement en EAN-13 uniquement.
 - Tickets avec coordonnées, BRN, date, client facultatif, articles, paiement, total et TVA configurable. Les tickets gardent les coordonnées et prix d’origine.
-- Historique, réimpression, remboursement intégral avec réintégration du stock et trace conservée. Effectuer également le remboursement effectif au client.
+- Historique, réimpression, retours partiels ou intégraux avec choix de la remise en stock et justificatifs liés à la vente. Effectuer également le remboursement effectif au client.
 - Rapports par période, modes de paiement, remboursements à leur date effective, export CSV et alertes de stock.
 - Sauvegarde SQLite cohérente téléchargeable depuis les paramètres.
 
@@ -48,7 +48,7 @@ Le test d’intégration utilise une base temporaire et exerce connexion, créat
 
 ## Limites à traiter avant déploiement en magasin
 
-Le matériel physique n’a pas été fourni : scanner, qualité des étiquettes, impression thermique et découpe doivent être validés sur les modèles retenus. L’ouverture automatique du tiroir, l’impression silencieuse et ESC/POS/ZPL nécessitent une passerelle ou un pilote adapté. Il n’existe pas encore d’intégration bancaire, de gestion des comptes caissiers et de leurs rôles, de clôtures de caisse, de retours partiels, de vente au poids, de remises manuelles ou de synchronisation entre magasins. La version actuelle utilise un seul compte administrateur ; les paiements carte et virement sont un enregistrement, pas un débit bancaire. Une mise en production demande ces décisions métier et la validation fiscale des reçus.
+Le matériel physique n’a pas été fourni : scanner, qualité des étiquettes, impression thermique et découpe doivent être validés sur les modèles retenus. L’ouverture automatique du tiroir, l’impression silencieuse et ESC/POS/ZPL nécessitent une passerelle ou un pilote adapté. Il n’existe pas encore d’intégration bancaire, de gestion des comptes caissiers et de leurs rôles, de clôtures de caisse, de vente au poids, de remises manuelles ou de synchronisation entre magasins. La version actuelle utilise un seul compte administrateur ; les paiements carte et virement sont un enregistrement, pas un débit bancaire. Une mise en production demande ces décisions métier et la validation fiscale des reçus.
 
 ## Interface web
 
@@ -103,3 +103,16 @@ La remise est unique et ne se cumule pas à chaque groupe de six : 12 unités du
 Le panier et le ticket détaillent les remises ; l’export CSV contient le sous-total avant remise et la remise totale. Chaque vente conserve son calcul d’origine dans `pricing`, y compris pour les réimpressions et remboursements. L’ajout de ce champ ne recalcule pas les anciens tickets.
 
 Tests de tarification : `node --test tests/pricing.test.cjs` et `python3 -m unittest discover -s tests -v`. Les tests couvrent les seuils 5/6/7/12, les paniers mixtes, les arrondis, les paiements, la TVA, la déduplication et les remboursements.
+
+
+## Retours partiels et tickets de remboursement
+
+Depuis **Ventes & tickets → Voir le ticket → Retour / Retirer des articles**, choisir la quantité de chaque article à retourner et cocher ou décocher **Remettre en stock**. Choisir le mode de remboursement, indiquer un motif facultatif et confirmer. Le bouton de sélection de toutes les quantités restantes permet un retour intégral ou le retour du solde après un premier retour partiel.
+
+Le montant est calculé d’après le prix réellement payé sur le ticket, remise comprise, sans recalculer la promotion des articles conservés. Les centimes sont répartis sur les retours successifs afin que le remboursement de toutes les unités corresponde exactement au montant initialement payé. La TVA remboursée est répartie à partir de la TVA enregistrée lors de la vente.
+
+La vente et son ticket original conservent leurs montants. Chaque retour possède une référence, une date, des quantités, un montant, un mode et un choix de remise en stock enregistrés dans un registre distinct. Le ticket de remboursement est imprimable immédiatement ou depuis l’historique des retours lié au ticket d’origine. Le statut devient **Retour partiel**, puis **Remboursée** quand toutes les unités ont été retournées. Les quantités déjà retournées ne peuvent pas l’être une seconde fois ; le serveur sérialise les opérations et déduplique les envois avec le même identifiant.
+
+Les articles supprimés ne sont jamais recréés ni remis en stock sur une nouvelle fiche réutilisant le même code. Les anciens remboursements intégraux sont importés une seule fois dans le registre à leur date d’origine, sans nouvel effet sur le stock. Leur mode est indiqué comme mode de paiement d’origine, faute de choix de remboursement distinct dans l’ancien système.
+
+Les rapports déduisent les retours à la date effective du remboursement. L’export des ventes indique les remboursements cumulés de chaque vente ; l’export des retours utilise la période de dates des retours eux-mêmes. L’application enregistre les opérations : effectuer également le remboursement réel en espèces ou via le terminal bancaire.
