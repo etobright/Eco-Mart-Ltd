@@ -1,5 +1,5 @@
 """Eco Mart POS — local trusted workstation server, Python 3.12+."""
-import os, json, sqlite3, secrets, hashlib, hmac, time, io
+import re, os, json, sqlite3, secrets, hashlib, hmac, time, io
 from threading import Lock
 from http.cookies import SimpleCookie
 from urllib.parse import parse_qs, urlsplit
@@ -42,6 +42,7 @@ def init():
         CREATE TABLE IF NOT EXISTS movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE SET NULL, product_name TEXT NOT NULL, quantity INTEGER NOT NULL, reason TEXT NOT NULL, created TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS product_ids (id INTEGER PRIMARY KEY CHECK(id=1), next_id INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS refunds (id INTEGER PRIMARY KEY AUTOINCREMENT, sale_id INTEGER NOT NULL REFERENCES sales(id), reference TEXT NOT NULL UNIQUE, created TEXT NOT NULL, total INTEGER NOT NULL, tax INTEGER NOT NULL, method TEXT NOT NULL, reason TEXT NOT NULL, lines TEXT NOT NULL, request_key TEXT NOT NULL UNIQUE, request_hash TEXT NOT NULL, legacy INTEGER NOT NULL DEFAULT 0);
+        CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE COLLATE NOCASE, name TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('admin','cashier')), password_hash TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, auth_version INTEGER NOT NULL DEFAULT 1, created TEXT NOT NULL);
         CREATE INDEX IF NOT EXISTS refunds_sale_id ON refunds(sale_id);
         ''')
         if 'product_name' not in {r['name'] for r in c.execute('PRAGMA table_info(movements)')}:
@@ -63,6 +64,18 @@ def init():
         c.execute('INSERT OR IGNORE INTO product_ids VALUES(1,(SELECT COALESCE(MAX(id),0)+1 FROM products))')
         c.execute('UPDATE product_ids SET next_id=MAX(next_id,(SELECT COALESCE(MAX(id),0)+1 FROM products)) WHERE id=1')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)', (json.dumps(dict(name='Eco Mart Ltd', address="Royal Road, L’Escalier, Mauritius",brn='C26238002',phone='',vat_number='',vat_rate='0',footer='Merci pour votre visite !',paper='80',password_hash='')),))
+        for table,prefix in [('sales','cashier'),('refunds','operator')]:
+            columns={r['name'] for r in c.execute('PRAGMA table_info('+table+')')}
+            if prefix+'_id' not in columns:
+                c.execute('ALTER TABLE '+table+' ADD COLUMN '+prefix+'_id INTEGER')
+                c.execute('ALTER TABLE '+table+' ADD COLUMN '+prefix+'_name TEXT')
+        old=settings(c,True)
+        if old.get('password_hash') and not c.execute('SELECT 1 FROM users').fetchone():
+            c.execute("INSERT INTO users(username,name,role,password_hash,created) VALUES('admin','Administrateur','admin',?,?)",(old['password_hash'],now()))
+        if old.get('password_hash'):
+            old['password_hash']=''
+            c.execute('UPDATE settings SET value=? WHERE id=1',(json.dumps(old),))
+
 
 def movement(c,pid,quantity,reason,name=None):
     if name is None: name=c.execute('SELECT name FROM products WHERE id=?',(pid,)).fetchone()[0]
@@ -84,6 +97,14 @@ def settings(c, private=False):
     s=json.loads(c.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
     if not private: s.pop('password_hash',None)
     return s
+
+def public_user(user):
+    return {k:user[k] for k in ('id','username','name','role','active','created')}
+
+def valid_username(value):
+    username=str(value).strip().lower()
+    if not re.fullmatch(r'[a-z0-9._-]{3,40}',username): raise ValueError('Identifiant : 3 à 40 lettres sans accent, chiffres, points, tirets ou underscores.')
+    return username
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self,*a,**kw): super().__init__(*a,directory=str(ROOT/'static'),**kw)
@@ -114,8 +135,11 @@ class Handler(SimpleHTTPRequestHandler):
         try: cookie.load(self.headers.get('Cookie', ''))
         except Exception: return ''
         return cookie['pos_session'].value if 'pos_session' in cookie else ''
-    def authenticated(self):
-        return SESSIONS.get(self.session_token(),0)>time.time()
+    def current_user(self,c):
+        session=SESSIONS.get(self.session_token())
+        if not session or session['expires']<=time.time(): return None
+        user=c.execute('SELECT * FROM users WHERE id=? AND active=1',(session['user_id'],)).fetchone()
+        return user if user and user['auth_version']==session['version'] else None
     def do_GET(self):
         path=self.path.split('?')[0]
         if not path.startswith('/api/'): return super().do_GET()
@@ -123,9 +147,15 @@ class Handler(SimpleHTTPRequestHandler):
             if path=='/api/health':
                 c.execute('SELECT 1 FROM settings WHERE id=1').fetchone()
                 return self.send_json({'ok':True})
-            if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,version=APP_VERSION,authenticated=self.authenticated()))
-            if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
-            if path=='/api/state': return self.send_json(dict(settings=settings(c),version=APP_VERSION,promotion=PROMOTION, products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],refunds=[dict(r) for r in c.execute('SELECT * FROM refunds ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,COALESCE(p.name,m.product_name) AS name FROM movements m LEFT JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
+            if path=='/api/status': return self.send_json(dict(setup=not bool(c.execute('SELECT 1 FROM users').fetchone()),setup_requires_token=PUBLIC,version=APP_VERSION,authenticated=bool(self.current_user(c))))
+            user=self.current_user(c)
+            if not user: return self.send_json({'error':'Connexion requise.'},401)
+            admin=user['role']=='admin'
+            if not admin and path not in ('/api/state',): return self.send_json({'error':'Accès réservé à l’administrateur.'},403)
+            if path=='/api/state':
+                sales=[dict(r) for r in c.execute('SELECT * FROM sales'+('' if admin else ' WHERE cashier_id=?')+' ORDER BY id DESC',() if admin else (user['id'],))]
+                refunds=[dict(r) for r in c.execute('SELECT refunds.* FROM refunds JOIN sales ON sales.id=refunds.sale_id'+('' if admin else ' WHERE sales.cashier_id=?')+' ORDER BY refunds.id DESC',() if admin else (user['id'],))]
+                return self.send_json(dict(current_user=public_user(user),users=[public_user(r) for r in c.execute('SELECT * FROM users ORDER BY name')] if admin else [],settings=settings(c),version=APP_VERSION,promotion=PROMOTION,products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')] if admin else [],sales=sales,refunds=refunds,movements=[dict(r) for r in c.execute('SELECT m.*,COALESCE(p.name,m.product_name) AS name FROM movements m LEFT JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')] if admin else []))
             if path=='/api/labels/pdf':
                 try:
                     query=parse_qs(urlsplit(self.path).query)
@@ -162,19 +192,42 @@ class Handler(SimpleHTTPRequestHandler):
                         AUTH_ATTEMPTS.append(time.monotonic())
                     p=str(d.get('password',''))
                     if path.endswith('setup'):
-                        if s['password_hash']: raise ValueError('Compte déjà créé.')
+                        if c.execute('SELECT 1 FROM users').fetchone(): raise ValueError('Compte déjà créé.')
                         if PUBLIC and not hmac.compare_digest(str(d.get('setup_token','')),os.environ['POS_SETUP_TOKEN']):
                             return self.send_json({'error':'Code d’activation incorrect. Consultez POS_SETUP_TOKEN dans votre tableau de bord Render.'},403)
                         if len(p)<10: raise ValueError('Choisissez au moins 10 caractères.')
-                        s['password_hash']=password_hash(p);c.execute('UPDATE settings SET value=?',(json.dumps(s),))
-                    elif not s['password_hash'] or not hmac.compare_digest(password_hash(p,s['password_hash'].split(':')[0]),s['password_hash']):
-                        time.sleep(0.5);return self.send_json({'error':'Mot de passe incorrect.'},401)
-                    for expired in [k for k,v in SESSIONS.items() if v<=time.time()]: SESSIONS.pop(expired,None)
-                    token=secrets.token_urlsafe(32);SESSIONS[token]=time.time()+43200;c.commit()
+                        username=valid_username(d.get('username','admin'))
+                        c.execute("INSERT INTO users(username,name,role,password_hash,created) VALUES(?,?,'admin',?,?)",(username,'Administrateur',password_hash(p),now()))
+                    user=c.execute('SELECT * FROM users WHERE username=? AND active=1',(str(d.get('username','admin')).strip().lower(),)).fetchone()
+                    stored=user['password_hash'] if user else password_hash('invalid-account')
+                    if not user or not hmac.compare_digest(password_hash(p,stored.split(':')[0]),stored):
+                        time.sleep(0.5);return self.send_json({'error':'Identifiant ou mot de passe incorrect.'},401)
+                    for expired in [k for k,v in list(SESSIONS.items()) if v['expires']<=time.time()]: SESSIONS.pop(expired,None)
+                    token=secrets.token_urlsafe(32);SESSIONS[token]=dict(expires=time.time()+43200,user_id=user['id'],version=user['auth_version']);c.commit()
                     self.send_response(200);self.send_header('Content-Type','application/json');self.send_header('Set-Cookie',f'pos_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200'+('; Secure' if PUBLIC else ''));self.end_headers();return self.wfile.write(b'{}')
-                if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
+                user=self.current_user(c)
+                if not user: return self.send_json({'error':'Connexion requise.'},401)
+                if user['role']!='admin' and path not in ('/api/logout','/api/sale'):
+                    return self.send_json({'error':'Accès réservé à l’administrateur.'},403)
                 if path=='/api/logout':
                     SESSIONS.pop(self.session_token(),None)
+                elif path=='/api/users/save':
+                    uid=integer(d['id'],1) if d.get('id') else None
+                    username=valid_username(d.get('username',''))
+                    name=str(d.get('name','')).strip()[:100]
+                    role=d.get('role','cashier');active=d.get('active',True)
+                    if not name or role not in ('admin','cashier') or not isinstance(active,bool): raise ValueError('Nom, rôle ou statut invalide.')
+                    old=c.execute('SELECT * FROM users WHERE id=?',(uid,)).fetchone() if uid else None
+                    if uid and not old: raise ValueError('Compte introuvable.')
+                    if c.execute('SELECT 1 FROM users WHERE username=? AND id!=?',(username,uid or 0)).fetchone(): raise ValueError('Cet identifiant est déjà utilisé.')
+                    if old and old['role']=='admin' and old['active'] and (role!='admin' or not active) and c.execute("SELECT COUNT(*) FROM users WHERE role='admin' AND active=1").fetchone()[0]<=1: raise ValueError('Conservez au moins un administrateur actif.')
+                    password=str(d.get('password',''))
+                    if (not uid or password) and not 10<=len(password)<=200: raise ValueError('Mot de passe : entre 10 et 200 caractères.')
+                    if uid:
+                        c.execute('UPDATE users SET username=?,name=?,role=?,active=?,auth_version=auth_version+1 WHERE id=?',(username,name,role,int(active),uid))
+                        if password: c.execute('UPDATE users SET password_hash=? WHERE id=?',(password_hash(password),uid))
+                    else:
+                        c.execute('INSERT INTO users(username,name,role,active,password_hash,created) VALUES(?,?,?,?,?,?)',(username,name,role,int(active),password_hash(password),now()))
                 elif path=='/api/product':
                     name=str(d['name']).strip()[:150];category=str(d.get('category','Autres')).strip()[:80] or 'Autres'
                     if not name: raise ValueError('Nom requis.')
@@ -214,8 +267,10 @@ class Handler(SimpleHTTPRequestHandler):
                     c.execute('UPDATE products SET active=1 WHERE id=?',(pid,))
                 elif path=='/api/sale':
                     key=str(d['request_key'])[:100]
-                    existing=c.execute('SELECT id FROM sales WHERE request_key=?',(key,)).fetchone()
-                    if existing: return self.send_json({'id':existing[0]})
+                    existing=c.execute('SELECT id,cashier_id FROM sales WHERE request_key=?',(key,)).fetchone()
+                    if existing:
+                        if user['role']!='admin' and existing['cashier_id']!=user['id']: return self.send_json({'error':'Identifiant de vente déjà utilisé.'},409)
+                        return self.send_json({'id':existing[0]})
                     if not d['lines']: raise ValueError('Panier vide.')
                     lines=[];total=0;seen=set()
                     for item in d['lines']:
@@ -234,7 +289,7 @@ class Handler(SimpleHTTPRequestHandler):
                     if tendered<total: raise ValueError('Montant reçu insuffisant.')
                     rate=Decimal(s['vat_rate']);tax=int((Decimal(total)*rate/(100+rate)).quantize(Decimal('1'),rounding=ROUND_HALF_UP))
                     company=settings(c);ref='EM-'+datetime.now(ZoneInfo('Indian/Mauritius')).strftime('%Y%m%d')+'-'+secrets.token_hex(4).upper()
-                    saleid=c.execute('INSERT INTO sales(reference,created,total,tax,payment,tendered,customer,lines,company,request_key,pricing) VALUES(?,?,?,?,?,?,?,?,?,?,?)',(ref,now(),total,tax,payment,tendered,str(d.get('customer',''))[:200],json.dumps(lines),json.dumps(company),key,json.dumps(pricing))).lastrowid
+                    saleid=c.execute('INSERT INTO sales(reference,created,total,tax,payment,tendered,customer,lines,company,request_key,pricing,cashier_id,cashier_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(ref,now(),total,tax,payment,tendered,str(d.get('customer',''))[:200],json.dumps(lines),json.dumps(company),key,json.dumps(pricing),user['id'],user['name'])).lastrowid
                     c.commit();return self.send_json({'id':saleid})
                 elif path in ('/api/returns','/api/refund'):
                     legacy=path=='/api/refund'
@@ -270,7 +325,7 @@ class Handler(SimpleHTTPRequestHandler):
                         else:
                             if item['restock_requested']: skipped.append({'name':item['name'],'qty':item['qty']})
                             movement(c,item['product_id'] if product else None,0,'Retour '+reference+' — '+str(item['qty'])+' unité(s) sans remise en stock',item['name'])
-                    rid=c.execute('INSERT INTO refunds(sale_id,reference,created,total,tax,method,reason,lines,request_key,request_hash) VALUES(?,?,?,?,?,?,?,?,?,?)',(sid,reference,now(),total,tax,method,reason,json.dumps(items),key,digest)).lastrowid
+                    rid=c.execute('INSERT INTO refunds(sale_id,reference,created,total,tax,method,reason,lines,request_key,request_hash,operator_id,operator_name) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(sid,reference,now(),total,tax,method,reason,json.dumps(items),key,digest,user['id'],user['name'])).lastrowid
                     if fully_returned: c.execute('UPDATE sales SET refunded=1,refund_at=? WHERE id=?',(now(),sid))
                     c.commit();return self.send_json({'ok':True,'refund_id':rid,'total':total,'skipped_restock':skipped})
                 elif path=='/api/settings':

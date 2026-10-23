@@ -33,7 +33,7 @@ Variables facultatives : `PORT` (8000), `HOST` (127.0.0.1), `POS_DB` (data/pos.s
 2. Imprimer une étiquette test à 100 %, sans en-têtes ni pieds de page du navigateur. Sélectionner dans le pilote le papier 50 × 25 mm et les marges nulles. Vérifier physiquement la lecture avant un tirage.
 3. Configurer le scanner USB en mode clavier, clavier compatible avec le poste, suffixe **Entrée**. Dans Point de vente, placer le curseur dans le champ de recherche avant de scanner. Une pression Entrée ajoute le produit correspondant.
 4. Encaisser, puis imprimer le ticket depuis son aperçu. Configurer le pilote de l’imprimante thermique en 58 ou 80 mm, selon le réglage de la caisse. Le pilote détermine le papier réel et la découpe.
-5. Sauvegarder quotidiennement sur un autre support. Pour restaurer : arrêter le serveur, préserver la base actuelle, remplacer le fichier `data/pos.sqlite3` par la sauvegarde, puis redémarrer et vérifier les dernières ventes. Protéger les sauvegardes qui contiennent les données clients et le hash du mot de passe.
+5. Sauvegarder quotidiennement sur un autre support. Pour restaurer : arrêter le serveur, préserver la base actuelle, remplacer le fichier `data/pos.sqlite3` par la sauvegarde, puis redémarrer et vérifier les dernières ventes. Protéger les sauvegardes qui contiennent les données clients et les empreintes des mots de passe.
 
 La TVA est désactivée par défaut : le document fourni ne contient pas de numéro de TVA. Faire confirmer le statut et les mentions fiscales avant exploitation ; renseigner numéro et taux pour l’activer. Les prix sont considérés TTC lorsque la TVA est activée.
 
@@ -48,7 +48,7 @@ Le test d’intégration utilise une base temporaire et exerce connexion, créat
 
 ## Limites à traiter avant déploiement en magasin
 
-Le matériel physique n’a pas été fourni : scanner, qualité des étiquettes, impression thermique et découpe doivent être validés sur les modèles retenus. L’ouverture automatique du tiroir, l’impression silencieuse et ESC/POS/ZPL nécessitent une passerelle ou un pilote adapté. Il n’existe pas encore d’intégration bancaire, de gestion des comptes caissiers et de leurs rôles, de clôtures de caisse, de vente au poids, de remises manuelles ou de synchronisation entre magasins. La version actuelle utilise un seul compte administrateur ; les paiements carte et virement sont un enregistrement, pas un débit bancaire. Une mise en production demande ces décisions métier et la validation fiscale des reçus.
+Le matériel physique n’a pas été fourni : scanner, qualité des étiquettes, impression thermique et découpe doivent être validés sur les modèles retenus. L’ouverture automatique du tiroir, l’impression silencieuse et ESC/POS/ZPL nécessitent une passerelle ou un pilote adapté. Il n’existe pas encore d’intégration bancaire, de clôtures de caisse, de vente au poids, de remises manuelles ou de synchronisation entre magasins. Les paiements carte et virement sont un enregistrement, pas un débit bancaire. Une mise en production demande ces décisions métier et la validation fiscale des reçus.
 
 ## Interface web
 
@@ -116,3 +116,12 @@ La vente et son ticket original conservent leurs montants. Chaque retour possèd
 Les articles supprimés ne sont jamais recréés ni remis en stock sur une nouvelle fiche réutilisant le même code. Les anciens remboursements intégraux sont importés une seule fois dans le registre à leur date d’origine, sans nouvel effet sur le stock. Leur mode est indiqué comme mode de paiement d’origine, faute de choix de remboursement distinct dans l’ancien système.
 
 Les rapports déduisent les retours à la date effective du remboursement. L’export des ventes indique les remboursements cumulés de chaque vente ; l’export des retours utilise la période de dates des retours eux-mêmes. L’application enregistre les opérations : effectuer également le remboursement réel en espèces ou via le terminal bancaire.
+
+## Comptes de l’équipe
+
+Dans **Équipe & accès**, un administrateur peut créer un compte avec nom, identifiant unique, mot de passe (10 à 200 caractères), rôle et statut. Sur téléphone, cette rubrique est dans **Plus**. Le bouton **Modifier / Mot de passe** permet de réinitialiser le mot de passe ou de désactiver un accès. Chaque modification du compte invalide ses sessions immédiatement ; au moins un administrateur actif doit rester présent.
+
+- **Administrateur** : tous les écrans, tous les tickets, catalogue, retours, rapports, paramètres, sauvegardes et gestion des comptes.
+- **Caissier** : point de vente et consultation/réimpression de ses propres tickets ; aucun accès aux fonctions de gestion ou aux tickets des autres caissiers. Les droits sont contrôlés côté serveur.
+
+À la mise à jour, le compte administrateur existant devient **admin**, avec son mot de passe habituel. Aucune nouvelle activation Render n’est nécessaire. Les nouvelles installations choisissent leur premier identifiant au démarrage. Les anciennes ventes restent sans attribution ; chaque nouvelle vente conserve l’identifiant et le nom du caissier au moment de l’encaissement, également imprimé sur le ticket. Les retours conservent l’administrateur qui les a enregistrés. Les mots de passe sont stockés sous forme d’empreintes PBKDF2, jamais renvoyés à l’interface.

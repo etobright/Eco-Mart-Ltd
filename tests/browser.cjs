@@ -84,6 +84,20 @@ const assert=require('node:assert/strict');
   for(const width of [320,430]){await page.setViewportSize({width,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`Overflow at ${width}px: ${await page.evaluate(()=>[...document.querySelectorAll('body *')].filter(el=>el.getBoundingClientRect().right>window.innerWidth+1&&getComputedStyle(el).display!=='none').slice(0,12).map(el=>el.tagName+'.'+el.className+' '+el.getBoundingClientRect().width).join('; '))}`)}
   await page.setViewportSize({width:1440,height:1060});assert.ok(await page.locator('.layout>aside').isVisible());assert.equal(await page.locator('.mobile-bottom-nav').isVisible(),false);assert.equal(await page.locator('.mobile-brand').isVisible(),false);
   await page.locator('#help').click();await page.getByRole('heading',{name:'À vos côtés, en caisse'}).waitFor();await page.locator('#close-modal').click();
+  // Admin creates a staff login; cashier sees only permitted pages and own sales.
+  await page.locator('.layout>aside nav [data-page=users]').click();await page.locator('#add-user').click();
+  await page.locator('#user-form [name=name]').fill('Alice caisse');await page.locator('#user-form [name=username]').fill('caisse1');await page.locator('#user-form [name=password]').fill('cashier-ui-test-password');await page.locator('#save-user').click();await page.waitForFunction(()=>!document.querySelector('dialog').open);assert.match(await page.locator('#view').innerText(),/caisse1/);
+  const staff=(await(await page.request.get(url+'/api/state')).json()).users.find(u=>u.username==='caisse1');
+  await page.locator('#logout').click();await page.locator('#username').fill('caisse1');await page.locator('#password').fill('cashier-ui-test-password');await page.locator('#login-submit').click();await page.locator('#search').waitFor();
+  assert.equal(await page.locator('.layout>aside nav [data-page=users]').count(),0);assert.equal(await page.locator('[data-page=settings]').count(),0);assert.equal(await page.locator('[data-page=products]').count(),0);
+  await page.locator('.layout>aside nav [data-page=sales]').click();assert.equal(await page.locator('[data-receipt]').count(),0);
+  let cashierState=await(await page.request.get(url+'/api/state')).json();assert.equal(cashierState.current_user.name,'Alice caisse');assert.equal(cashierState.sales.length,0);
+  const sold=await page.request.post(url+'/api/sale',{data:{request_key:'ui-cashier-sale',lines:[{id:rice.id,qty:1}],payment:'Carte'}});assert.ok(sold.ok());
+  await page.locator('.layout>aside nav [data-page=sales]').click();await page.locator('[data-receipt]').click();assert.equal(await page.locator('#refund').count(),0);assert.match(await page.locator('#modal .receipt').innerText(),/Alice caisse/);await page.locator('#close-modal').click();
+  await page.setViewportSize({width:390,height:844});assert.equal(await page.locator('.mobile-bottom-nav [data-page]').count(),2);await page.locator('#mobile-more').click();assert.equal(await page.locator('#mobile-more-content [data-page]').count(),0);await page.locator('#close-modal').click();
+  const adminContext=await browser.newContext();const adminLogin=await adminContext.request.post(url+'/api/login',{data:{username:'admin',password:'isolated-ui-test-password'}});assert.ok(adminLogin.ok());
+  assert.ok((await adminContext.request.post(url+'/api/users/save',{data:{...staff,active:false}})).ok());
+  assert.equal((await page.request.get(url+'/api/state')).status(),401);await page.reload();await page.locator('#username').waitFor();await adminContext.close();
   assert.deepEqual(errors,[]);console.log('PASS: desktop/tablet/mobile, dashboard, catalogue, scan, payment, receipt, labels, navigation, help; no JS errors.');console.log('Screenshots:',artifacts);
  }finally{if(browser)await browser.close();server.kill();await new Promise(r=>server.once('exit',r));}
 })().catch(e=>{console.error(e);process.exitCode=1});
