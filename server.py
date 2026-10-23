@@ -37,9 +37,25 @@ def init():
         CREATE TABLE IF NOT EXISTS settings (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT NOT NULL, barcode TEXT NOT NULL UNIQUE, category TEXT NOT NULL, price INTEGER NOT NULL CHECK(price>=0), stock INTEGER NOT NULL CHECK(stock>=0), active INTEGER NOT NULL DEFAULT 1);
         CREATE TABLE IF NOT EXISTS sales (id INTEGER PRIMARY KEY, reference TEXT UNIQUE NOT NULL, created TEXT NOT NULL, total INTEGER NOT NULL, tax INTEGER NOT NULL, payment TEXT NOT NULL, tendered INTEGER NOT NULL, customer TEXT NOT NULL, lines TEXT NOT NULL, company TEXT NOT NULL, refunded INTEGER NOT NULL DEFAULT 0, refund_at TEXT, request_key TEXT UNIQUE NOT NULL);
-        CREATE TABLE IF NOT EXISTS movements (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id), quantity INTEGER NOT NULL, reason TEXT NOT NULL, created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS movements (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE SET NULL, product_name TEXT NOT NULL, quantity INTEGER NOT NULL, reason TEXT NOT NULL, created TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS product_ids (id INTEGER PRIMARY KEY CHECK(id=1), next_id INTEGER NOT NULL);
         ''')
+        if 'product_name' not in {r['name'] for r in c.execute('PRAGMA table_info(movements)')}:
+            backup_path=DB.with_name(DB.name+'.before-delete-migration-'+secrets.token_hex(4)+'.bak')
+            with sqlite3.connect(backup_path) as backup: c.backup(backup)
+            os.chmod(backup_path,0o600)
+            c.execute('BEGIN IMMEDIATE')
+            c.execute("CREATE TABLE movements_new (id INTEGER PRIMARY KEY AUTOINCREMENT, product_id INTEGER REFERENCES products(id) ON DELETE SET NULL, product_name TEXT NOT NULL, quantity INTEGER NOT NULL, reason TEXT NOT NULL, created TEXT NOT NULL)")
+            c.execute("INSERT INTO movements_new SELECT m.id,m.product_id,p.name,m.quantity,m.reason,m.created FROM movements m JOIN products p ON p.id=m.product_id")
+            c.execute('DROP TABLE movements')
+            c.execute('ALTER TABLE movements_new RENAME TO movements')
+        c.execute('INSERT OR IGNORE INTO product_ids VALUES(1,(SELECT COALESCE(MAX(id),0)+1 FROM products))')
+        c.execute('UPDATE product_ids SET next_id=MAX(next_id,(SELECT COALESCE(MAX(id),0)+1 FROM products)) WHERE id=1')
         c.execute('INSERT OR IGNORE INTO settings VALUES(1,?)', (json.dumps(dict(name='Eco Mart Ltd', address="Royal Road, L’Escalier, Mauritius",brn='C26238002',phone='',vat_number='',vat_rate='0',footer='Merci pour votre visite !',paper='80',password_hash='')),))
+
+def movement(c,pid,quantity,reason,name=None):
+    if name is None: name=c.execute('SELECT name FROM products WHERE id=?',(pid,)).fetchone()[0]
+    c.execute('INSERT INTO movements(product_id,product_name,quantity,reason,created) VALUES(?,?,?,?,?)',(pid,name,quantity,reason,now()))
 
 def now(): return datetime.now(ZoneInfo('Indian/Mauritius')).isoformat(timespec='seconds')
 def integer(v, low=0, high=1000000):
@@ -98,7 +114,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json({'ok':True})
             if path=='/api/status': return self.send_json(dict(setup=not settings(c,True)['password_hash'],setup_requires_token=PUBLIC,version=APP_VERSION,authenticated=self.authenticated()))
             if not self.authenticated(): return self.send_json({'error':'Connexion requise.'},401)
-            if path=='/api/state': return self.send_json(dict(settings=settings(c),version=APP_VERSION, products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,p.name FROM movements m JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
+            if path=='/api/state': return self.send_json(dict(settings=settings(c),version=APP_VERSION, products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=1 ORDER BY name')],archived_products=[dict(r) for r in c.execute('SELECT * FROM products WHERE active=0 ORDER BY name')],sales=[dict(r) for r in c.execute('SELECT * FROM sales ORDER BY id DESC')],movements=[dict(r) for r in c.execute('SELECT m.*,COALESCE(p.name,m.product_name) AS name FROM movements m LEFT JOIN products p ON p.id=m.product_id ORDER BY m.id DESC LIMIT 500')]))
             if path=='/api/labels/pdf':
                 try:
                     query=parse_qs(urlsplit(self.path).query)
@@ -168,9 +184,19 @@ class Handler(SimpleHTTPRequestHandler):
                         if not old: raise ValueError('Produit introuvable.')
                         c.execute('UPDATE products SET name=?,category=?,price=?,stock=?,barcode=? WHERE id=?',(name,category,price,stock,barcode,pid));delta=stock-old[0]
                     else:
-                        pid=c.execute('INSERT INTO products(name,category,price,stock,barcode) VALUES(?,?,?,?,?)',(name,category,price,stock,barcode)).lastrowid;delta=stock
-                    if delta: c.execute('INSERT INTO movements(product_id,quantity,reason,created) VALUES(?,?,?,?)',(pid,delta,'Inventaire / réception',now()))
+                        pid=c.execute('SELECT next_id FROM product_ids WHERE id=1').fetchone()[0]
+                        c.execute('UPDATE product_ids SET next_id=next_id+1 WHERE id=1')
+                        c.execute('INSERT INTO products(id,name,category,price,stock,barcode) VALUES(?,?,?,?,?,?)',(pid,name,category,price,stock,barcode));delta=stock
+                    if delta: movement(c,pid,delta,'Inventaire / réception')
                 elif path=='/api/archive': c.execute('UPDATE products SET active=0 WHERE id=?',(integer(d['id'],1),))
+                elif path=='/api/delete-product':
+                    pid=integer(d['id'],1)
+                    if d.get('confirmation')!='SUPPRIMER': raise ValueError('Confirmation de suppression requise.')
+                    product=c.execute('SELECT * FROM products WHERE id=?',(pid,)).fetchone()
+                    if not product: return self.send_json({'error':'Produit déjà supprimé ou introuvable.'},404)
+                    if d.get('barcode')!=product['barcode']: return self.send_json({'error':'Le produit a changé. Actualisez sa fiche avant de le supprimer.'},409)
+                    if product['stock']: movement(c,pid,-product['stock'],'Suppression définitive de la fiche — retrait du stock')
+                    c.execute('DELETE FROM products WHERE id=?',(pid,))
                 elif path=='/api/restore':
                     pid=integer(d['id'],1)
                     if not c.execute('SELECT id FROM products WHERE id=?',(pid,)).fetchone(): return self.send_json({'error':'Produit introuvable.'},404)
@@ -188,7 +214,7 @@ class Handler(SimpleHTTPRequestHandler):
                         if not p or p['stock']<qty: raise ValueError('Stock insuffisant. Actualisez le panier.')
                         if 'expected_price' in item and item['expected_price'] != p['price']: raise ValueError('Le prix a changé. Actualisez le panier avant de payer.')
                         lines.append(dict(id=pid,name=p['name'],barcode=p['barcode'],qty=qty,price=p['price']));total+=p['price']*qty
-                        c.execute('UPDATE products SET stock=stock-? WHERE id=?',(qty,pid));c.execute('INSERT INTO movements(product_id,quantity,reason,created) VALUES(?,?,?,?)',(pid,-qty,'Vente',now()))
+                        c.execute('UPDATE products SET stock=stock-? WHERE id=?',(qty,pid));movement(c,pid,-qty,'Vente')
                     payment=d['payment']
                     if payment not in ['Espèces','Carte','Virement']: raise ValueError('Mode de paiement invalide.')
                     tendered=money(d['tendered']) if payment=='Espèces' else total
@@ -200,9 +226,17 @@ class Handler(SimpleHTTPRequestHandler):
                 elif path=='/api/refund':
                     sale=c.execute('SELECT * FROM sales WHERE id=?',(integer(d['id'],1),)).fetchone()
                     if not sale or sale['refunded']: raise ValueError('Vente introuvable ou déjà remboursée.')
+                    skipped=[]
                     for item in json.loads(sale['lines']):
-                        c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['qty'],item['id']));c.execute('INSERT INTO movements(product_id,quantity,reason,created) VALUES(?,?,?,?)',(item['id'],item['qty'],'Remboursement '+sale['reference'],now()))
+                        product=c.execute('SELECT id FROM products WHERE id=?',(item['id'],)).fetchone()
+                        if product:
+                            c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['qty'],item['id']))
+                            movement(c,item['id'],item['qty'],'Remboursement '+sale['reference'])
+                        else:
+                            skipped.append({'name':item['name'],'qty':item['qty']})
+                            movement(c,None,0,'Remboursement '+sale['reference']+' — fiche supprimée, sans remise en stock',item['name'])
                     c.execute('UPDATE sales SET refunded=1,refund_at=? WHERE id=?',(now(),sale['id']))
+                    c.commit();return self.send_json({'ok':True,'skipped_restock':skipped})
                 elif path=='/api/settings':
                     for k in ['name','address','brn','phone','vat_number','footer']: s[k]=str(d.get(k,s[k])).strip()[:300]
                     rate=Decimal(str(d['vat_rate']))

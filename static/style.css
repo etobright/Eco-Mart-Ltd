@@ -104,3 +104,4 @@
 }
 @media(max-width:680px){.mobile-bottom-nav button>span{display:block}.mobile-bottom-nav button>.mobile-tab-icon{display:grid}}
 @media(max-width:680px){.catalog-panel>.chips{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-left:-18px;margin-right:-18px;padding:0 18px 3px}.catalog-panel>.chips button{flex-shrink:0}}
+.delete-product-summary{padding:16px;border:1px solid #efded8;background:#fffaf8;border-radius:10px}.delete-product-summary>strong{display:block;font-size:15px;color:#8e594c}.delete-product-summary small{margin-top:5px;color:#a88b7b}.delete-confirm-button{background:#ab5447;border-color:#ab5447;color:#fff}.delete-confirm-button:hover{background:#914237;border-color:#914237}#product-form .actions{flex-wrap:wrap}@media(max-width:680px){#delete-product-form .actions{flex-wrap:wrap}#confirm-delete{min-height:46px}}

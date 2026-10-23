@@ -54,4 +54,16 @@ class POS(unittest.TestCase):
   with self.assertRaises(urllib.error.HTTPError):self.call('state')
   self.call('login',{'password':'test-password-123'})
   self.assertEqual(len(self.call('state')['sales']),2)
+  sales_before=self.call('state')['sales']
+  with self.assertRaises(urllib.error.HTTPError):self.call('delete-product',{'id':p['id'],'barcode':p['barcode']})
+  self.assertEqual(len(self.call('state')['products']),1)
+  with self.assertRaises(urllib.error.HTTPError):self.call('delete-product',{'id':p['id'],'barcode':'wrong','confirmation':'SUPPRIMER'})
+  self.call('delete-product',{'id':p['id'],'barcode':p['barcode'],'confirmation':'SUPPRIMER'})
+  after=self.call('state');self.assertEqual(after['products'],[]);self.assertEqual(after['archived_products'],[]);self.assertEqual(after['sales'],sales_before)
+  self.assertTrue(after['movements']);self.assertTrue(all(m['product_id'] is None for m in after['movements']))
+  self.call('product',dict(name='Nouvelle fiche',category='Épicerie',price='9',stock='7',barcode=p['barcode']))
+  replacement=self.call('state')['products'][0];self.assertGreater(replacement['id'],p['id']);self.assertEqual(replacement['barcode'],p['barcode'])
+  refunded=self.call('refund',new);self.assertEqual(refunded['skipped_restock'],[{'name':'Riz','qty':2}]);self.assertEqual(self.call('state')['products'][0]['stock'],7)
+  self.call('archive',{'id':replacement['id']});self.call('delete-product',{'id':replacement['id'],'barcode':p['barcode'],'confirmation':'SUPPRIMER'});self.assertEqual(self.call('state')['archived_products'],[])
+
 if __name__=='__main__':unittest.main()

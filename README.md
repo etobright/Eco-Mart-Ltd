@@ -83,3 +83,13 @@ Sur téléphone (jusqu’à 680 px de largeur), la navigation prend la forme d�
 ## Réactiver un produit archivé
 
 Dans **Produits & stock**, les onglets **Actifs** et **Archivés** permettent de retrouver les deux listes. **Réactiver** remet le produit existant en vente avec le même identifiant, code-barres, stock et historique, puis ouvre sa fiche pour vérifier prix et quantité. Si un ajout utilise le code d’un produit archivé, le formulaire propose directement de le réactiver. Aucune vente passée et aucun mouvement de stock ne sont supprimés ou recréés pendant cette opération. L’archivage masque le produit en caisse et conserve son code pour cette réactivation.
+
+## Supprimer définitivement un produit
+
+**Archiver** masque un produit, garde son code réservé et permet sa réactivation. **Supprimer définitivement** retire réellement sa fiche des listes Actifs et Archivés et libère le code pour une nouvelle fiche.
+
+Pour un produit actif : **Modifier → Supprimer définitivement**. Pour un produit archivé : bouton **Supprimer définitivement** dans l’onglet Archivés. La fenêtre indique le nom, le code et le stock retiré, puis demande de saisir `SUPPRIMER`. L’opération ne peut pas être annulée depuis l’application.
+
+Les tickets et mouvements historiques restent conservés, avec les informations d’origine : la suppression du catalogue n’efface donc pas les codes figurant sur les anciens tickets. Un remboursement reste possible après suppression ; les produits supprimés ne sont pas remis en stock et la nouvelle fiche éventuellement créée avec le même code ne reçoit pas ce retour. Les identifiants de produits ne sont jamais réutilisés.
+
+Au premier démarrage sur une ancienne base, la migration conserve les mouvements, rend leur lien produit facultatif et crée auparavant une sauvegarde locale `pos.sqlite3.before-delete-migration-*.bak` à côté de la base. Ne pas restaurer cette sauvegarde sur le service en cours sans arrêter celui-ci et préserver les ventes plus récentes. La migration et son redémarrage sont couverts par un test sur une base au format précédent.
